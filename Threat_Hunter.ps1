@@ -10,16 +10,23 @@
 ### Step 10: Hamming Frequency analysis to look for similar naming +
 ### Step 11: Add reasons for failures +
 ### Step 12: Ability to download latest application definitions +
-### Step 13: Logic for when Echo Trails API key runs out or doesnt work
-### Step 14: Add PS-Remoting
-### Step 15: After PS-Remoting, add host to Output Results
-### Possible: After PS-Remoting add Long Tail analysis to anomalous results?
+### Step 13: Add DLL baselining for applications +
+### Step 14: ADD SEPARATE FUNCTION CHECK: $processModules.modules.FileName  ###SANS 508 b1.p76 
+###          Maybe add logic for services that should run as user that run as something else?
+### Step 15: Logic for when Echo Trails API key runs out or doesnt work
+### Step 16: Add PS-Remoting
+### Step 17: After PS-Remoting, add host to Output Results
+### Step 18: Add module for Sigma hunting
+### Step 19: Traditional AV functionality (Hash -> VT)
+### Possible: Add Long Tail analysis to anomalous results? or leave to Kansa?
 ### Possible: Add freq.py / gravejester / day 4 functionality for other freq analysis?
 ### Possible: Reference to look up process creation times for analysis, Handles, etc? 
-### Possible: In future maybe add network connection baseline? - Lab4.3 might be good reference; also lab5.2
-### Possible: In future maybe add loaded libraries into memory?
-### Definitely: Add module for Sigma hunting
+### Possible: In future maybe add non-ephemeral network ports baseline? - Lab4.3 might be good reference; also lab5.2
+### Possible: In future add to memory hunting
 ### Possible: Add Get-ProcessMitigation <app> info (b4p23)?
+### Possible: Add prefetch to service baselining, but note only covers first 10 seconds of execution
+### Possible: Eric Zimmerman says scheduled tasks and new services are the place to look, perhaps add analysis module?
+### Possible: forensics b1p60 common malware names & locations
 ### Possible: Add GUI with parameters (download-may need to offer ability to diffmerge baselines, enter Echo Trails API key, Tune the Hamming Distance, etc)
 
 #############################################################
@@ -37,7 +44,7 @@ if ($PullLatestBaseline){
 }
 
 #Define Echo Trails API Key 
-$ETkey = "<enter-api-key-here>"
+$ETkey = "0pWySfWK530M3pWAvcipaUsNyxNF9wC9AIVDma12"
 
 #Create / Clear our output files
 $goodfile = './output/processHunting/good.csv'
@@ -53,6 +60,7 @@ New-Item -ItemType File -Path $fullDataNotReturned -Force | Out-Null
 #Keep track of current running Proc looking at
 $RunningProcess
 $Process
+$loadedDLL = ""
 $reason
 $MultipleParentTest = $false
 #Import the CSV and normalize the data, for now null & multiple values in a cell
@@ -70,6 +78,9 @@ foreach ($process in $CoreProcesses) {
     }
     if (($process.UserAccount -eq "null") -or ($process.UserAccount -eq "")){
         $process.UserAccount = $null
+    }
+    if (($process.LoadedDlls -eq "null") -or ($process.LoadedDlls -eq "")){
+        $process.LoadedDlls = $null
     }
     if (($process.ChildProcs -eq "null") -or ($process.ChildProcs -eq "")){
         $process.ChildProcs = $null
@@ -121,25 +132,29 @@ Function Append-CSV {
     #Anomalous processes
     elseif ($whichfile -eq $anomalousfile) {
         $csvfile = [PSCustomObject]@{
-            ProcessName = $RunningProcess.Name
+            ProcessName         = $RunningProcess.Name
             ExpectedProcessName = $CoreProcess.procName
-            ProcessId = $RunningProcess.ProcessId
-            Path = $RunningProcess.Path
-            ExpectedPath = $CoreProcess.ImagePath
-            ParentProcessId = $RunningProcess.ParentProcessID
-            ParentProcess = $RunningProcess.ParentProcess
-            ExpectedParent = $CoreProcess.parentProc
-            NumberOfInstances = $RunningProcess.NumberOfInstances
+            ProcessId           = $RunningProcess.ProcessId
+            Path                = $RunningProcess.Path
+            ExpectedPath        = $CoreProcess.ImagePath
+            ParentProcessId     = $RunningProcess.ParentProcessID
+            ParentProcess       = $RunningProcess.ParentProcess
+            ExpectedParent      = $CoreProcess.parentProc
+            NumberOfInstances   = $RunningProcess.NumberOfInstances
             ExpectedNumberofInstances = $CoreProcess.NumberOfInstances
-            UserAccount = $RunningProcess.Owner
+            UserAccount         = $RunningProcess.Owner
             ExpectedUserAccount = $CoreProcess.UserAccount
-            ExpectedParentProc = $parentProc
-            ExpecteDChildProcs = $childProcs
+            AnomalousLoadedDLL  = $loadedDLL
+            #ExpectedParentProc = $parentProc
+            ExpecteDChildProcs  = $childProcs
             ExpectedGrandParentProcs = $grandParentProcs
-            ExpectedPorts = $ports
-            Reason = $reason
-            Notes = $intel
+            ExpectedPorts       = $ports
+            Reason              = $reason
+            Notes               = $intel
         }
+    }
+    else{
+        break
     }
     
     $csvfile | Export-CSV $whichfile -Force –Append
@@ -147,12 +162,6 @@ Function Append-CSV {
 
 Function Append-CSV-EchoTrails {
     #Processes matching baseline and unknowns have regular minimal data
-Write-Output("Children:")
-$results.children
-Write-Output("grandparents:")
-$results.grandparents
-Write-Output("network conns:")
-$results.network
 
         $csvfile = [PSCustomObject]@{
             ProcessName = $RunningProcess.Name
@@ -359,6 +368,7 @@ Function Get-ChildProcesses { #Return all child processes for a given process
         ParentProcessID = $_.ParentProcessID
         ParentProcess   = $parentproc.Name #these are root level procs
         ParentPath      = $parentproc.Path #these are root level procs
+        LoadedDlls      = ""
         Started         = $_.CreationDate
         Owner           = "$($owner.Domain)\$($owner.user)"
         CommandLine     = $_.Commandline
@@ -367,12 +377,13 @@ Function Get-ChildProcesses { #Return all child processes for a given process
         #output
         $newDepth = $depth + 1
 
+
         if($_.Name -in $CoreProcesses.procName){
             $runningProc = $_.Name
             $CoreProcess = $CoreProcesses | Where-Object {$runningProc -eq $_.procName}
     
             #First Logic: Check the Path of the Executable. Note some values are null, especially root processes
-            if(($RunningProcess.Path -eq $CoreProcess.ImagePath) -or ($RunningProcess.Path -contains 'C:\Users\' -and $CoreProcess.ImagePath -contains 'C:\Users\') -or ($RunningProcess.Path -contains "C:\ProgramData" -and $CoreProcess.ImagePath -contains 'C:\ProgramData\')){
+            if(($CoreProcess.ImagePath -eq "MULTIPLE") -or ($RunningProcess.Path -eq $CoreProcess.ImagePath) -or ($RunningProcess.Path -contains 'C:\Users\' -and $CoreProcess.ImagePath -contains 'C:\Users\') -or ($RunningProcess.Path -contains "C:\ProgramData" -and $CoreProcess.ImagePath -contains 'C:\ProgramData\')){
 
                 #Loop through values, using $MultipleParentMatch to pass to next if
                 $MultipleParentMatch = $false
@@ -392,16 +403,43 @@ Function Get-ChildProcesses { #Return all child processes for a given process
                 if(($CoreProcess.ParentProc -eq "MULTIPLE") -or ($RunningProcess.ParentProcess -eq $CoreProcess.ParentProc) -or ($MultipleParentMatch)){
                     if (($CoreProcess.NumberOfInstances -eq 1 -and $RunningProcess.NumberOfInstances -eq $CoreProcess.NumberOfInstances) -or ($CoreProcess.NumberOfInstances -eq 2)) {
                         #Note this code block mostly checks for systems that should be running specifically under SYSTEM, LOCAL SERVICE, or NETWORK SERVICE
-                        if (($CoreProcess.UserAccount -eq "MULTIPLE") -or ($CoreProcess.UserAccount -eq "SYSTEM" -and $RunningProcess.Owner -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq $null -and ($($RunningProcess.Owner)) -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq "LOCAL SERVICE" -and ($($RunningProcess.Owner)) -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq "NETWORK SERVICE" -and ($($RunningProcess.Owner)) -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -notin "SYSTEM","LOCAL SERVICE","NETWORK SERVICE" -or $CoreProcess.UserAccount -ne $null)){
+                        if (($CoreProcess.UserAccount -eq "MULTIPLE" -or $CoreProcess.UserAccount -eq "HOST") -or ($CoreProcess.UserAccount -eq "SYSTEM" -and $RunningProcess.Owner -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq $null -and ($($RunningProcess.Owner)) -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq "LOCAL SERVICE" -and ($($RunningProcess.Owner)) -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq "NETWORK SERVICE" -and ($($RunningProcess.Owner)) -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -notin "SYSTEM","LOCAL SERVICE","NETWORK SERVICE" -or $CoreProcess.UserAccount -ne $null)){
                             $SetStyleBelow = "$($PSStyle.Foreground.BrightGreen)"
-                            Set-StyleChildrenProcs
-                            #Add to file
                             $whichfile = $goodfile
-                            Append-CSV
+
+                            ###Check all loaded DLLs per proc against baseline data; note DLL baseline location separate function
+                            if($CoreProcess.LoadedDlls -eq $null){
+                                #Write-Host("($($RunningProcess.Name)) baseline loaded dlls has a null value")
+                            }
+                            elseif($CoreProcess.LoadedDlls -eq "MULTIPLE"){
+                                #NOT Baselineable, like svchost
+                            }
+                            else{
+                                $processModules = Get-Process -Id $RunningProcess.ProcessID|select modules
+                                $CoreProcess.LoadedDlls = $CoreProcess.LoadedDlls.split(",")
+                            
+                                foreach ($loadedDLL in $processModules.modules.ModuleName){
+                                    if ($loadedDLL -in $CoreProcess.LoadedDlls){
+
+                                    }
+                                    else{
+                                        $SetStyleBelow = "$($PSStyle.Foreground.BrightRed)"
+                                        $SetStyleBelow
+                                        $reason += "($($loadedDLL)) is NOT in the DLL baseline list "
+                                        Write-Host("$($loadedDLL),")
+                                        $whichfile = $anomalousfile
+                                    }
+                            } #$reason
+                        }
+                        Append-CSV
+                        Set-StyleChildrenProcs
+
                         }
                         else{
                             $SetStyleBelow = "$($PSStyle.Foreground.BrightRed)"
                             Set-StyleChildrenProcs
+                            $reason = "Different User Context than expected"
+                            $reason
                             #Add to file
                             $whichfile = $anomalousfile
                             Append-CSV
@@ -525,6 +563,7 @@ $rootParents | ForEach-Object {
             ParentProcessID = $_.ParentProcessID
             #ParentProcess   = $parent.Name #these are root level procs
             #ParentPath      = $parent.Path #these are root level procs
+            LoadedDlls      = ""
             Started         = $_.CreationDate
             Owner           = "$($owner.Domain)\$($owner.user)"
             CommandLine     = $_.Commandline
@@ -537,22 +576,46 @@ $rootParents | ForEach-Object {
         $CoreProcess = $CoreProcesses | Where-Object {$runningProc -eq $_.procName}
 
         #First Logic: Check the Path of the Executable. Note some values are null, especially root processes
-        if(($RunningProcess.Path -eq $CoreProcess.ImagePath) -or ($RunningProcess.Path -contains 'C:\Users\' -and $CoreProcess.ImagePath -contains 'C:\Users\') -or ($RunningProcess.Path -contains "C:\ProgramData" -and $CoreProcess.ImagePath -contains 'C:\ProgramData\')){
+        if(($CoreProcess.ImagePath -eq "MULTIPLE") -or ($RunningProcess.Path -eq $CoreProcess.ImagePath) -or ($RunningProcess.Path -contains 'C:\Users\' -and $CoreProcess.ImagePath -contains 'C:\Users\') -or ($RunningProcess.Path -contains "C:\ProgramData" -and $CoreProcess.ImagePath -contains 'C:\ProgramData\')){
             if (($CoreProcess.NumberOfInstances -eq 1 -and $RunningProcess.NumberOfInstances -eq $CoreProcess.NumberOfInstances) -or ($CoreProcess.NumberOfInstances -eq 2)) {
 
                 #Note this code block mostly checks for systems that should be running specifically under SYSTEM, LOCAL SERVICE, or NETWORK SERVICE
                 if (($CoreProcess.UserAccount -eq "MULTIPLE") -or ($CoreProcess.UserAccount -eq "SYSTEM" -and $RunningProcess.Owner -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq $null -and $RunningProcess.Owner -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq "LOCAL SERVICE" -and $RunningProcess.Owner -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -eq "NETWORK SERVICE" -and $RunningProcess.Owner -eq $CoreProcess.UserAccount) -or ($CoreProcess.UserAccount -notin "SYSTEM","LOCAL SERVICE","NETWORK SERVICE" -or $CoreProcess.UserAccount -ne $null)){
                         $SetStyleBelow = "$($PSStyle.Foreground.BrightGreen)"
-                        Set-StyleRootProcs
-
-                        #Add to file
                         $whichfile = $goodfile
+
+                        ###Check all loaded DLLs per proc against baseline data; note DLL baseline location separate function
+                        if($CoreProcess.LoadedDlls -eq $null){
+                            #Write-Host("($($RunningProcess.Name)) baseline loaded dlls has a null value")
+                        }
+                        else{
+                            $processModules = Get-Process -Id $RunningProcess.ProcessID|select modules
+
+                            $CoreProcess.LoadedDlls = $CoreProcess.LoadedDlls.split(",")
+                            
+                            foreach ($loadedDLL in $processModules.modules.ModuleName){
+                                if ($loadedDLL -in $CoreProcess.LoadedDlls){
+
+                                }
+                                elseif($CoreProcess.LoadedDlls -eq "MULTIPLE"){
+                                    #NOT Baselineable, like svchost
+                                }
+                                else{
+                                    $SetStyleBelow = "$($PSStyle.Foreground.BrightRed)"
+                                    $SetStyleBelow
+                                    $reason += "($($loadedDLL)) is NOT in the DLL baseline list "
+                                    $whichfile = $anomalousfile
+                                    
+                                }
+                            } $reason
+                        }
                         Append-CSV
+                        Set-StyleRootProcs
                 }
                 else{
                         $SetStyleBelow = "$($PSStyle.Foreground.BrightRed)"
                         $SetStyleBelow
-                        $reason = "User context did not match"
+                        $reason = "Different User Context than expected"
                         $reason
                         Set-StyleRootProcs
                         
