@@ -5,12 +5,14 @@
 ### Step 5: malfind
 ### Step 6: NSRL Query - https://github.com/Status-418/nsrl-api
 ### Step 6: ThreatGrid query
-### Step 7: Bstrings? or maybe fireeye floss?
-### Step 8: yarascan?
-### Step 9: Clean up
-### Step 10: files? 508 b3p83
-### Step 11: Shellbags? volatility -f victim.raw --profile=Win7SP1x64 shellbags
-### Step 12: Create response for S1 investigation
+### Step 7: ThreatGrid logic to see if file already submitted
+### Step 8: Detect if proxy set up
+### Step 9: Bstrings? or maybe fireeye floss?
+### Step 10: yarascan?
+### Step 11: Clean up
+### Step 12: files? 508 b3p83
+### Step 13: Shellbags? volatility -f victim.raw --profile=Win7SP1x64 shellbags
+### Step 14: Create response for S1 investigation
 ### Ideally I was trying to use direct memory analysis but VMs have issues 
 
 
@@ -70,7 +72,7 @@ Function Analyze-DLLsFull {
                 }
                 
                 $DLLPath = "C:\temp\proc\$($dll[4])"
-                #Submit-ToThreatGrid($DLLPath)
+                Submit-ToThreatGrid($DLLPath)
 
 
                 #bstrings?
