@@ -1,53 +1,36 @@
-### Step 1: Pivot from Anomaly Detection to Memory Analysis
+### Step 1: Pivot from Anomaly Detection to Memory Analysis 
 ### Step 2: Function to check if space available, split out mem dump
 ### Step 3: dlllist/dlldump +
-### Step 4: malfind
-### Step 5: VT Query
-### Step 6: NVD Query?
+### Step 4: VT Query +
+### Step 5: malfind
+### Step 6: NSRL Query - https://github.com/Status-418/nsrl-api
 ### Step 6: ThreatGrid query
-### Step 7: Bstrings?
+### Step 7: Bstrings? or maybe fireeye floss?
 ### Step 8: yarascan?
-### Step 9: files? 508 b3p83
-### Step 10: Shellbags? volatility -f victim.raw --profile=Win7SP1x64 shellbags
-### Step 11: Create response for S1 investigation
+### Step 9: Clean up
+### Step 10: files? 508 b3p83
+### Step 11: Shellbags? volatility -f victim.raw --profile=Win7SP1x64 shellbags
+### Step 12: Create response for S1 investigation
 ### Ideally I was trying to use direct memory analysis but VMs have issues 
 
 
 # WinPmem download: https://github.com/Velocidex/WinPmem/releases
 # Volatility download: https://www.volatilityfoundation.org/releases
 #Requires -RunAsAdministrator
-
-#VirusTotal
-$VTapikey = "d6279cc78c23bc5ab8db6d4cec65243b956ffdbab10b4d0e6d05618bbe0bf91f"
-$VTPositives = "unknown"
+Install-Module -Name 7Zip4Powershell -Scope CurrentUser -Force
+. ./modules/Check-VirusTotal.ps1
+. ./modules/Submit-ToThreatGrid.ps1
 
 #Create folders if they don't exist
 New-Item -ItemType Directory -Path C:\temp\proc\ -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path C:\temp\TG-Submissions\ -ErrorAction SilentlyContinue
 
 #Imports
 $TrustedCerts = Import-Csv -Path ./baselines/TrustedCerts.csv #for bypassing
 $AnomolousProcs = Import-Csv -Path ./output/Hunting/anomalousProcs.csv
 $AnomolousProcsOptimized = @()
 $AnomolousDLLsOptimized = @()
-
-#Check VirusTotal
-Function Check-VirusTotal {
-    $fileHash = Get-FileHash ($DLLPath) | Select-Object -ExpandProperty Hash
-    $uri = "https://www.virustotal.com/vtapi/v2/file/report?apikey=$VTapikey&resource=$fileHash"
-    
-    try {
-        $VTPositives = Invoke-RestMethod -Uri $uri |Select-Object -ExpandProperty positives
-        return $VTPositives
-    } 
-    catch {
-        if ([string]$Error[0] -like "*(403) Forbidden.*"){
-            Write-Host("Error reaching out to VirusTotal, most likely due to the API key missing.")
-        }
-        else{
-            $reason = "Error reaching VirusTotal."
-        }
-    }
-}
+$VTPositives = "unknown"
 
 Function Analyze-DLLsFull {
     #dlllist / dlldump #Dumpfiles was missing python package
@@ -69,9 +52,27 @@ Function Analyze-DLLsFull {
             }
             else{
                 $VTPositives = Check-VirusTotal($dll)
+                $dll[5]
                 Write-Host("$($dll[4]) has $($VTPositives) hits on VT.")
+
+                ###NSRL Query
                 
                 #TG
+                $pattern = "*pid.$($dll[0]).$($dll[4])*"
+                $BeforeName = Get-Childitem -Path "C:\temp\proc" -Filter $pattern | Select Name
+                
+                $pattern = "C:\temp\proc$($pattern)"
+                if($BeforeName.Name.Count -eq 1){
+                    Rename-Item "C:\temp\proc\$($BeforeName.Name)" $dll[4] -ErrorAction SilentlyContinue
+                }
+                else{
+                    Rename-Item "C:\temp\proc\$($BeforeName.Name[0])" $dll[4] -ErrorAction SilentlyContinue
+                }
+                
+                $DLLPath = "C:\temp\proc\$($dll[4])"
+                #Submit-ToThreatGrid($DLLPath)
+
+
                 #bstrings?
                 #report?
             }
@@ -88,7 +89,7 @@ Function Analyze-DLLsFull {
         #4 indicates nothing returned on malfind
     }
     else{
-Write-Host("malfind results need to be flushed out")
+Write-Host("malfind results need to be flushed out for hits")
     }
  
     #yarascan
