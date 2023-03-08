@@ -83,8 +83,8 @@ $api_headers = @{
 
 			# This is the file itself
 			"------------MULTIPARTBOUNDARY_`$",
-			("Content-Disposition: form-data; name=`"sample`"; filename=`"${fileName}`""),
-			("Content-Type: `"${fileType}`""),
+			("Content-Disposition: form-data; name=`"sample`"; filename=`"$($fileName)`""),
+			("Content-Type: `"$($fileType)`""),
 			"",
 			$fileContent,
 			"------------MULTIPARTBOUNDARY_`$--",
@@ -95,16 +95,17 @@ $api_headers = @{
 		$ContentType = 'multipart/form-data; boundary=----------MULTIPARTBOUNDARY_$'
 
 		$Uri = "https://panacea.threatgrid.com/api/v2/samples"
+		$Uri
 		try {
 			# Call ThreatGRID
 			$Response = Invoke-RestMethod -Uri $Uri -Headers $api_headers -method POST -Body $Body -ContentType $ContentType
             Start-Sleep -Seconds 30 #Wait
 
-            Remove-Item $currentfile
+			#$Response | Select-Object -ExpandProperty data
+
             #Remove-Item -Path C:\temp\proc\ -Recurse
 		}
 		catch {
-			write-host "Failed to upload" $FileName "to ThreatGrid"
 			#return $null
 		}
 }
