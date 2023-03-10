@@ -3,24 +3,31 @@
 ### Step 3: dlllist/dlldump +
 ### Step 4: VT Query +
 ### Step 5: malfind
-### Step 6: NSRL Query - https://github.com/Status-418/nsrl-api
-### Step 6: ThreatGrid query
+### Step 6: ThreatGrid query +
 ### Step 7: ThreatGrid logic to see if file already submitted
-### Step 8: Detect if proxy set up
-### Step 9: Bstrings? or maybe fireeye floss?
-### Step 10: yarascan?
-### Step 11: Clean up
-### Step 12: files? 508 b3p83
-### Step 13: Shellbags? volatility -f victim.raw --profile=Win7SP1x64 shellbags
-### Step 14: Create response for S1 investigation
+### Step 8: NSRL Query - https://github.com/Status-418/nsrl-api
+### Step 9: Filescan.io - waiting to hear back on full report details
+### Step 10: Detect if proxy set up
+### Step 10: Bstrings? or maybe fireeye floss?
+### Step 11: yarascan? - maybe just use Filescan.io to optimize
+### Step 12: Clean up
+### Step 13: files? 508 b3p83
+### Step 14: Shellbags? volatility -f victim.raw --profile=Win7SP1x64 shellbags
+### Step 15: Create response for S1 investigation
 ### Ideally I was trying to use direct memory analysis but VMs have issues 
 
 
 # WinPmem download: https://github.com/Velocidex/WinPmem/releases
 # Volatility download: https://www.volatilityfoundation.org/releases
 #Requires -RunAsAdministrator
-Install-Module -Name 7Zip4Powershell -Scope CurrentUser -Force
+
+#Install 7Zip Module if it doesn't exist
+$test = Get-InstalledModule | findstr 7Zip4Powershell
+if($test){}else{Install-Module -Name 7Zip4Powershell -Scope CurrentUser -Force}
+
+#Add in modules
 . ./modules/Check-VirusTotal.ps1
+. ./modules/Check-ThreatGridHash.ps1
 . ./modules/Submit-ToThreatGrid.ps1
 
 #Create folders if they don't exist
@@ -60,6 +67,14 @@ Function Analyze-DLLsFull {
                 ###NSRL Query
                 
                 #TG
+                #First we check the original hash to see if it exists
+                $DLLPath = "C:\temp\proc\$($dll[4])"
+                Check-ThreatGridHash($DLLPath)
+
+                #The we check the zipped hash to see 
+                $DLLPath = "C:\temp\proc\$($dll[4])"
+                Check-ThreatGridHash($DLLPath)
+
                 $pattern = "*pid.$($dll[0]).$($dll[4])*"
                 $BeforeName = Get-Childitem -Path "C:\temp\proc" -Filter $pattern | Select Name
                 
@@ -71,7 +86,7 @@ Function Analyze-DLLsFull {
                     Rename-Item "C:\temp\proc\$($BeforeName.Name[0])" $dll[4] -ErrorAction SilentlyContinue
                 }
                 
-                $DLLPath = "C:\temp\proc\$($dll[4])"
+                
                 Submit-ToThreatGrid($DLLPath)
 
 
