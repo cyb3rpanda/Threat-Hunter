@@ -1,6 +1,6 @@
 ###############################
 #                             #
-# ThreatGrid Hash Submission  #
+#    ThreatGrid Hash Check    #
 # Script Author: Cyber Panda  #
 #                             #
 ###############################
@@ -9,6 +9,7 @@ Function Check-ThreatGridHash{
 
 ###ThreatGrid API key
 $key = "<enter-api-key-here>"
+$threatScore
 
 ###API header variable remains constant for all options
 $api_headers = @{
@@ -31,9 +32,20 @@ $total = $response.data.total
 
 ###Output the Threat Score and SHA256 from your organization
 for ($n=0; $n -lt $total;$n++){
-    if ($response.data[0].items[$n].item.analysis.threat_score){
-        Write-Host $n
-        Write-Host $response.data[0].items[$n].item.sha256
+    if ($response.data.items[$n].item.analysis.threat_score){
+        $temp = $response.data.items[$n].item.analysis.threat_score
+        if($threatScore){
+            if($temp > $threatScore){
+                $threatScore = $temp
+            }
         }
+        else{
+            $threatScore = $temp
+        }
+    }
+    else{
+        break;
+    }
 }
+return $threatScore
 }
